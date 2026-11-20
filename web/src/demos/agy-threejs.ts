@@ -423,12 +423,43 @@ if [ ! -x "$AGY_BIN" ]; then
 	exit 1
 fi
 
+# 6. Configure agy in Turbo mode by default (preserving any existing settings).
+python3 - <<'PY'
+import json, os
+
+cfg_dir = os.path.expanduser("~/.gemini/antigravity-cli")
+cfg_path = os.path.join(cfg_dir, "settings.json")
+os.makedirs(cfg_dir, exist_ok=True)
+try:
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        data = {}
+except Exception:
+    data = {}
+
+data.setdefault("$schema", "https://antigravity.google/schemas/v1/settings.json")
+data["toolPermission"] = "always-proceed"
+data["agentMode"] = "accept-edits"
+ws = os.path.realpath(os.getcwd())
+trusted = data.get("trustedWorkspaces")
+if not isinstance(trusted, list):
+    trusted = []
+if ws not in trusted:
+    trusted.append(ws)
+data["trustedWorkspaces"] = trusted
+
+with open(cfg_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\\n")
+PY
+
 echo ""
-echo "Laboratorio de IA Play Code listo en ~/threejs-games."
+echo "Laboratorio de IA Play Code listo en ~/threejs-games (modo Turbo activo)."
 echo "Pedile a agy que cree juegos 3D en Three.js, sitios web o webapps en index.html."
 echo ""
 
-"$AGY_BIN"
+"$AGY_BIN" --dangerously-skip-permissions
 `;
 
 export default {
