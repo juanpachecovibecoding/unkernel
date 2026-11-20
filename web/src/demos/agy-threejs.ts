@@ -86,7 +86,14 @@ Ya hay un servidor HTTP liviano corriendo en \`http://127.0.0.1:8000\` que sirve
 4. **Punto de entrada:** mantené el proyecto principal en \`index.html\` (o enlazá múltiples proyectos desde \`index.html\`).
 5. **Assets livianos y compatibles con COEP:** generá geometrías, texturas en \`<canvas>\` y audio con Web Audio API de forma procedural, o usá CDNs con CORS/CORP (\`cdn.jsdelivr.net\`, \`esm.sh\`).
 6. **Rendimiento en PCs de bajos recursos:** limitá \`renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))\` y reutilizá geometrías/materiales.
-7. Al terminar cada cambio, avisale al usuario que recargue el panel **Preview** (o abra \`Ctrl-A p\` en el puerto \`8000\`) para verlo en vivo.
+7. **GitHub (\`gh\` + \`git\`):** si el usuario pide crear un repositorio o subir el código a GitHub, verificá \`gh auth status\` y usá \`git\` + \`gh repo create <nombre> --public --source=. --push\` (o \`git push\`). Mantené \`.gitignore\` excluyendo \`.unkernel/\`, \`run.sh\` y \`AGENTS.md\` para subir solo el código limpio del proyecto.
+8. Al terminar cada cambio, avisale al usuario que recargue el panel **Preview** (o abra \`Ctrl-A p\` en el puerto \`8000\`) para verlo en vivo.
+`;
+
+const GITIGNORE = `.unkernel/
+run.sh
+AGENTS.md
+.DS_Store
 `;
 
 const STARTER_HTML = `<!doctype html>
@@ -367,9 +374,12 @@ cd "$(dirname "$0")/.."
 
 export PATH="$HOME/.local/bin:$PATH"
 
-# 1. Seed AGENTS.md once so user edits are preserved across launches.
+# 1. Seed AGENTS.md and .gitignore once so user edits are preserved across launches.
 if [ ! -f AGENTS.md ]; then
 	cp .unkernel/AGENTS.md.template AGENTS.md
+fi
+if [ ! -f .gitignore ]; then
+	cp .unkernel/gitignore.template .gitignore
 fi
 
 # 2. Cache Three.js locally once (~675 KB) for instant offline/COEP-safe loading.
@@ -456,6 +466,9 @@ PY
 
 echo ""
 echo "Laboratorio de IA Play Code listo en ~/threejs-games (modo Turbo activo)."
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+	echo "GitHub conectado (podes pedirle a agy que cree repos y haga push)."
+fi
 echo "Pedile a agy que cree juegos 3D en Three.js, sitios web o webapps en index.html."
 echo ""
 
@@ -476,6 +489,7 @@ export default {
 	files: {
 		".unkernel/serve.py": { content: SERVE_PY, mode: 0o755 },
 		".unkernel/AGENTS.md.template": AGENTS_MD,
+		".unkernel/gitignore.template": GITIGNORE,
 		".unkernel/starter.html": STARTER_HTML,
 		".unkernel/setup.sh": { content: SETUP_SH, mode: 0o755 },
 	},

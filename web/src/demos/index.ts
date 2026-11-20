@@ -4,6 +4,7 @@
 // A new demo: a file here that default-exports a Demo (launcher.ts), added below.
 import type { Demo } from "../launcher.ts";
 import agyThreejs from "./agy-threejs.ts";
+import github from "./github.ts";
 import bun from "./bun.ts";
 import claude from "./claude.ts";
 import docker from "./docker.ts";
@@ -30,4 +31,4 @@ import tmux from "./tmux.ts";
 import ubuntu from "./ubuntu.ts";
 import valkey from "./valkey.ts";
 
-export const DEMOS: Demo[] = [agyThreejs, glimmer, tmux, htop, mc, nvim, git, ubuntu, docker, claude, fx, sshfs, nginx, node, bun, nitro, python, go, rust, postgres, sqlite, valkey, radio, speak, dos, doom];
+export const DEMOS: Demo[] = [agyThreejs, github, glimmer, tmux, htop, mc, nvim, git, ubuntu, docker, claude, fx, sshfs, nginx, node, bun, nitro, python, go, rust, postgres, sqlite, valkey, radio, speak, dos, doom];

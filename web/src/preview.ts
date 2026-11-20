@@ -10,6 +10,8 @@
 // same-origin: the guest's pages can reach this page, so trusted content
 // only. .agents/web.md (Guest preview) lists the limits.
 import { useSyncExternalStore } from "react";
+import { KW } from "./kw.ts";
+import type { KernelHandle } from "./sdk.ts";
 import { ui$ } from "./store.ts";
 import { serviceWorker, swSupported } from "./sw.ts";
 import { store } from "./ui.ts";
@@ -220,4 +222,137 @@ export function previewCovers(p = ui$().get().preview, narrow = narrowNow()): bo
 export function yieldPreview(): void {
 	const p = ui$().get().preview;
 	if (p && previewCovers(p)) ui$().set({ preview: { ...p, shown: false } });
+}
+
+const EXPORT_ZIP_PY = `
+import io, os, re, sys, zipfile
+
+port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8000
+home = os.path.expanduser("~")
+bad_dirs = {"/", "/root", "/tmp", "/etc", "/usr", "/var", "/proc", "/sys", "/dev", "/bin", "/sbin", "/lib", home}
+
+def find_dir_for_port(target_port):
+    port_hex = f"{target_port:04X}"
+    inodes = set()
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                next(f, None)
+                for line in f:
+                    cols = line.split()
+                    if len(cols) >= 10 and cols[3] == "0A" and cols[1].split(":")[-1].upper() == port_hex:
+                        inodes.add(cols[9])
+        except OSError:
+            pass
+    if not inodes:
+        return None
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        fd_dir = f"/proc/{pid}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        matched = False
+        for fd in fds:
+            try:
+                link = os.readlink(f"{fd_dir}/{fd}")
+            except OSError:
+                continue
+            if link.startswith("socket:[") and link[8:-1] in inodes:
+                matched = True
+                break
+        if not matched:
+            continue
+        try:
+            cwd = os.path.realpath(os.readlink(f"/proc/{pid}/cwd"))
+        except OSError:
+            continue
+        # Respect python3 -m http.server -d / --directory <dir> when used
+        try:
+            raw = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\\x00")
+            args = [a.decode("utf-8", "ignore") for a in raw if a]
+            for i, a in enumerate(args):
+                if a in ("-d", "--directory") and i + 1 < len(args):
+                    cand = os.path.realpath(os.path.join(cwd, args[i + 1]))
+                    if os.path.isdir(cand) and cand not in bad_dirs:
+                        return cand
+                elif a.startswith("--directory="):
+                    cand = os.path.realpath(os.path.join(cwd, a.split("=", 1)[1]))
+                    if os.path.isdir(cand) and cand not in bad_dirs:
+                        return cand
+        except OSError:
+            pass
+        if os.path.isdir(cwd) and cwd not in bad_dirs:
+            return cwd
+    return None
+
+root = find_dir_for_port(port)
+if not root:
+    for fallback in (os.path.join(home, "threejs-games"), "/srv/nginx/www"):
+        if os.path.isdir(fallback):
+            root = os.path.realpath(fallback)
+            break
+if not root or not os.path.isdir(root):
+    sys.stderr.write("No se encontro una carpeta de proyecto para exportar.\\n")
+    sys.exit(2)
+
+skip_dirs = {".unkernel", ".git", "node_modules", "__pycache__", ".venv", "venv", ".next", ".nuxt", ".output", ".vercel", ".cache"}
+skip_root_files = {"run.sh", "AGENTS.md", ".DS_Store"}
+
+buf = io.BytesIO()
+count = 0
+with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in skip_dirs)
+        rel_dir = os.path.relpath(dirpath, root)
+        for fn in sorted(filenames):
+            if rel_dir == "." and fn in skip_root_files:
+                continue
+            full = os.path.join(dirpath, fn)
+            if not os.path.isfile(full) or os.path.islink(full):
+                continue
+            arc = fn if rel_dir == "." else os.path.join(rel_dir, fn)
+            zf.write(full, arc)
+            count += 1
+
+if count == 0:
+    sys.stderr.write(f"La carpeta {root} no tiene archivos para exportar.\\n")
+    sys.exit(3)
+
+slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", os.path.basename(root)).strip("-") or f"proyecto-{port}"
+sys.stderr.write(f"NAME:{slug}\\nFILES:{count}\\n")
+sys.stdout.buffer.write(buf.getvalue())
+`;
+
+/** Pack the guest project directory served on `port` into a ZIP and trigger a browser download. */
+export async function exportPreviewZip(port: number): Promise<void> {
+	const ui = KW.ui!;
+	const handle = KW.vm as KernelHandle | undefined;
+	if (!handle) {
+		ui.toast("El sistema no está corriendo todavía.");
+		return;
+	}
+	const r = await handle.exec("python3", ["-c", EXPORT_ZIP_PY, String(port)], { encoding: "buffer", timeout: 60_000 });
+	const errText = new TextDecoder().decode(r.stderr);
+	if (r.exitCode !== 0 || r.stdout.byteLength < 22) {
+		const msg = errText.trim().split("\n").pop() || `exit ${r.exitCode}`;
+		throw new Error(msg.includes("No such file") || msg.includes("not found")
+			? "Necesitás python3 instalado en el Linux para exportar el ZIP."
+			: msg);
+	}
+	const name = /^NAME:(.+)$/m.exec(errText)?.[1]?.trim() || `proyecto-${port}`;
+	const files = Number(/^FILES:(\d+)$/m.exec(errText)?.[1] ?? 0);
+	const blob = new Blob([r.stdout.slice()], { type: "application/zip" });
+	const href = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = href;
+	a.download = `${name}.zip`;
+	document.body.append(a);
+	a.click();
+	a.remove();
+	setTimeout(() => URL.revokeObjectURL(href), 10_000);
+	const kb = blob.size >= 1048576 ? `${(blob.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(blob.size / 1024))} KB`;
+	ui.toast(`Descargado ${name}.zip (${files} archivo${files === 1 ? "" : "s"}, ${kb})`);
 }

@@ -13,7 +13,7 @@
 // stays loaded.
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { KW } from "../kw.ts";
-import { closePreview, openPreview, previewReady, previewUrl, setPreviewFill, useNarrow } from "../preview.ts";
+import { closePreview, exportPreviewZip, openPreview, previewReady, previewUrl, setPreviewFill, useNarrow } from "../preview.ts";
 import { useStore } from "../store.ts";
 import { store } from "../ui.ts";
 
@@ -62,6 +62,7 @@ export function Preview() {
 	const [wait, setWait] = useState<string | null>("Starting the preview…");
 	const [field, setField] = useState("");
 	const [nonce, setNonce] = useState(0);
+	const [zipping, setZipping] = useState(false);
 	const frame = useRef<HTMLIFrameElement>(null);
 	const port = p?.port ?? 0;
 
@@ -88,6 +89,17 @@ export function Preview() {
 	const reload = () => {
 		try { frame.current?.contentWindow?.location.reload(); } catch { setNonce((n) => n + 1); }
 	};
+	const downloadZip = async () => {
+		if (zipping || !port) return;
+		setZipping(true);
+		try {
+			await exportPreviewZip(port);
+		} catch (e) {
+			KW.ui?.toast(`Error al exportar ZIP: ${(e as Error)?.message ?? e}`);
+		} finally {
+			setZipping(false);
+		}
+	};
 	const btn = "px-1 text-muted hover:text-fg disabled:opacity-40";
 
 	return (
@@ -102,6 +114,7 @@ export function Preview() {
 				<span className="text-faint">┤</span> preview<span className="text-faint">:</span>{port} <span className="text-faint">├</span>
 			</h2>
 			<div className="absolute -top-2 right-3 flex bg-bg px-1 text-[12px] leading-4">
+				<button id="preview-zip" type="button" className={btn} title="Descargar código del proyecto (.zip)" aria-label="Descargar código como ZIP" disabled={!url || zipping} onClick={() => void downloadZip()}>[{zipping ? "…" : "↓ zip"}]</button>
 				<button id="preview-reload" type="button" className={btn} title="Reload" aria-label="Reload the preview" disabled={!url} onClick={reload}>[↻]</button>
 				{!narrow && <button id="preview-max" type="button" className={btn} title={fill ? "Beside the terminal" : "Fill the stage"} aria-label={fill ? "Dock the preview beside the terminal" : "Fill the stage"} onClick={() => setPreviewFill(!fill)}>[{fill ? "▫" : "□"}]</button>}
 				<button id="preview-close" type="button" className={btn} title="Close" aria-label="Close the preview" onClick={closePreview}>[×]</button>
